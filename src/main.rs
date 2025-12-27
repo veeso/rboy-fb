@@ -1,5 +1,9 @@
+#[macro_use]
+extern crate log;
+
 mod app_config;
 mod args;
+mod menu;
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -78,11 +82,9 @@ fn main() -> anyhow::Result<()> {
     loop {
         app_state = match app_state {
             AppState::Emulator { config, rom_file } => {
-                run_emulator(&rom_file, config, framebuffer.clone())?
+                run_emulator(&rom_file, config, framebuffer.clone(), exit.clone())?
             }
-            AppState::Menu { config: _ } => {
-                todo!();
-            }
+            AppState::Menu { config } => run_menu(config, exit.clone())?,
             AppState::Exit => break,
         };
     }
@@ -90,10 +92,28 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn run_menu(config: Rc<AppConfig>, exit: Arc<AtomicBool>) -> anyhow::Result<AppState> {
+    // run input listener
+    let (keyboard_event_sender, keyboard_event_receiver) = mpsc::channel();
+
+    let input_listener_exit = Arc::new(AtomicBool::new(false));
+    let input_listener_thread =
+        run_input_listener(&config, input_listener_exit.clone(), keyboard_event_sender);
+
+    // run tui
+    let res = menu::AppMenu::new(config, exit, keyboard_event_receiver)?.run();
+    // stop input listener
+    input_listener_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = input_listener_thread.join();
+
+    res
+}
+
 fn run_emulator(
     rom_file: &Path,
     config: Rc<AppConfig>,
     framebuffer: Rc<Framebuffer>,
+    exit: Arc<AtomicBool>,
 ) -> anyhow::Result<AppState> {
     // zero framebuffer
     framebuffer.zero();
@@ -122,13 +142,11 @@ fn run_emulator(
     let cpu_thread = thread::spawn(move || run_cpu(cpu, video_sender, gb_event_receiver));
 
     // run input listener
-    let exit_flag = Arc::new(AtomicBool::new(false));
     let (keyboard_event_sender, keyboard_event_receiver) = mpsc::channel();
-    let input_listener_thread =
-        run_input_listener(&config, exit_flag.clone(), keyboard_event_sender);
+    let input_listener_thread = run_input_listener(&config, exit.clone(), keyboard_event_sender);
 
     loop {
-        if exit_flag.load(std::sync::atomic::Ordering::SeqCst) {
+        if exit.load(std::sync::atomic::Ordering::SeqCst) {
             break;
         }
 
@@ -163,7 +181,7 @@ fn run_emulator(
     // zero framebuffer
     framebuffer.zero();
 
-    if exit_flag.load(std::sync::atomic::Ordering::SeqCst) {
+    if exit.load(std::sync::atomic::Ordering::SeqCst) {
         Ok(AppState::Exit)
     } else {
         Ok(AppState::Menu { config })

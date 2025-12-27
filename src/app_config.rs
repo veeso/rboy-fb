@@ -1,6 +1,6 @@
 mod keycode;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub default_active_low: bool,
     /// polling interval in milliseconds
     poll_interval_ms: u64,
+    /// path to ROMs directory
+    pub roms_directory: PathBuf,
     /// Keys configuration
     #[serde(rename = "key", default)]
     pub keys: Vec<KeyConfig>,
@@ -103,6 +105,8 @@ mod tests {
         assert_eq!(config.default_active_low, true);
         assert_eq!(config.poll_interval_ms, 5);
 
+        assert_eq!(config.roms_directory, PathBuf::from("./roms"));
+
         assert_eq!(config.keys.len(), 2);
         assert_eq!(config.keys[0].gpio, 17);
         assert_eq!(config.keys[0].keycode.keycode(), KeypadKey::A);
@@ -137,6 +141,7 @@ mod tests {
     }
 
     const DEFAULT_CONFIG: &str = r#"
+roms_directory = "./roms"
 default_debounce_ms = 20 # default debounce time in milliseconds
 default_active_low = true # default active_low setting for keys; if true, key is active when GPIO is low
 poll_interval_ms = 5 # polling interval in milliseconds

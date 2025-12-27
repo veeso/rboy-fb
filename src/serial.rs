@@ -30,10 +30,11 @@ impl Serial {
                 self.control = v;
                 if v & 0x81 == 0x81
                     && let Some(callback) = &mut self.callback
-                        && let Some(result) = callback.call(self.data) {
-                            self.data = result;
-                            self.interrupt = 0x8;
-                        }
+                    && let Some(result) = callback.call(self.data)
+                {
+                    self.data = result;
+                    self.interrupt = 0x8;
+                }
             }
             _ => panic!("Serial does not handle address {:4X} (write)", a),
         };
