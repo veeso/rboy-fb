@@ -1,6 +1,9 @@
 #![crate_name = "rboy"]
 #![crate_type = "lib"]
 
+#[macro_use]
+extern crate log;
+
 pub use crate::gpu::{SCREEN_H, SCREEN_W};
 pub use crate::keypad::KeypadKey;
 pub use crate::serial::SerialCallback;
@@ -9,8 +12,10 @@ pub use crate::sound::AudioPlayer;
 pub mod device;
 
 mod cpu;
+pub mod framebuffer;
 mod gbmode;
 mod gpu;
+pub mod input;
 mod keypad;
 mod mbc;
 mod mmu;

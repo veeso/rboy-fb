@@ -8,7 +8,7 @@ pub struct Keypad {
     pub interrupt: u8,
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[derive(Copy, Debug, Clone, Serialize, Deserialize)]
 pub enum KeypadKey {
     Right,
     Left,

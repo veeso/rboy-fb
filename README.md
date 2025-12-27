@@ -25,10 +25,15 @@ Options:
   -s, --serial         Prints the data from the serial port to stdout
   -p, --printer        Emulates a gameboy printer
   -c, --classic        Forces the emulator to run in classic Gameboy mode
-  -x, --scale <scale>  Sets the scale of the interface. Default: 2
+      --width <width>  Sets the window width (default: 160)
+        --height <height>
+                            Sets the window height (default: 144)
   -a, --audio          Enables audio
       --skip-checksum  Skips verification of the cartridge checksum
       --test-mode      Starts the emulator in a special test mode
+      --pinout         Sets the pinout configuration to read input from gpio
+      --framebuffer <framebuffer>
+                            Sets the framebuffer device to use (default: /dev/fb0)
   -h, --help           Print help
   -V, --version        Print version
 ```
@@ -40,7 +45,7 @@ Now you can look below for the Keybindings section below.
 ### Gameplay Keybindings
 
 | Key on Keyboard    | Emulator Key       |
-| ------------------ | ------------------ |
+|--------------------|--------------------|
 | Z                  | A                  |
 | X                  | B                  |
 | Up/Down/Left/Right | Up/Down/Left/Right |
@@ -50,14 +55,13 @@ Now you can look below for the Keybindings section below.
 ### General Keybindings
 
 | Key on Keyboard   | Emulator Action                     |
-| ----------------- | ----------------------------------- |
+|-------------------|-------------------------------------|
 | 1                 | Switch to 1:1 scale                 |
 | R                 | Restore scale given on command line |
 | Left Shift (Hold) | Unrestricted Speed Mode             |
 | T                 | Change pixel interpolation          |
 
 ## Implemented
-
 
 * CPU
   - All instructions correct
@@ -80,6 +84,15 @@ Now you can look below for the Keybindings section below.
 ## Test mode
 The test mode, activated with the `--test-mode` flag, provides some functionality for running
 [GBEmulatorShootout](https://github.com/daid/GBEmulatorShootout). This is still under development.
+
+## Build for Raspberry Pi 32
+
+```bash
+rustup target add armv7-unknown-linux-musleabihf
+sudo apt install -y musl-tools gcc-arm-linux-gnueabihf
+
+cargo build --release --target armv7-unknown-linux-musleabihf
+```
 
 ## Special thanks to
 

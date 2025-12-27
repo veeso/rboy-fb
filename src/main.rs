@@ -3,14 +3,19 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample};
 use rboy::device::Device;
-use std::io::{self, Read};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use rboy::framebuffer::{Framebuffer, FramebufferConfig};
+use rboy::input::gpio::RaspberryGpio;
+use rboy::input::pinout::PinoutConfig;
+use rboy::input::{InputListener, InputListenerConfig, KeyConfig, KeyEvent, PowerSwitch};
+use std::io::{self, Read, Write};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
+use std::thread::JoinHandle;
 
 const EXITCODE_SUCCESS: i32 = 0;
-const EXITCODE_CPULOADFAILS: i32 = 2;
+const EXITCODE_CPU_LOAD_FAILS: i32 = 2;
 
 #[derive(Default)]
 struct RenderOptions {
@@ -22,19 +27,6 @@ enum GBEvent {
     KeyDown(rboy::KeypadKey),
     SpeedUp,
     SpeedDown,
-}
-
-#[cfg(target_os = "windows")]
-fn create_window_builder(romname: &str) -> winit::window::WindowBuilder {
-    use winit::platform::windows::WindowBuilderExtWindows;
-    return winit::window::WindowBuilder::new()
-        .with_drag_and_drop(false)
-        .with_title("RBoy - ".to_owned() + romname);
-}
-
-#[cfg(not(target_os = "windows"))]
-fn create_window_builder(romname: &str) -> winit::window::WindowBuilder {
-    return winit::window::WindowBuilder::new().with_title("RBoy - ".to_owned() + romname);
 }
 
 #[derive(Debug)]
@@ -57,15 +49,6 @@ impl std::fmt::Display for ArgParseError {
 }
 
 impl std::error::Error for ArgParseError {}
-
-fn parse_scale_var(arg: &str) -> Result<u32, ArgParseError> {
-    match arg.parse::<u32>() {
-        Err(e) => Err(ArgParseError::new(format!("Could not parse scale: {}", e))),
-        Ok(s) if s < 1 => Err(ArgParseError::new("Scale must be at least 1")),
-        Ok(s) if s > 8 => Err(ArgParseError::new("Scale may be at most 8")),
-        Ok(s) => Ok(s),
-    }
-}
 
 fn main() {
     let exit_status = real_main();
@@ -107,10 +90,29 @@ fn real_main() -> i32 {
         )
         .arg(
             clap::Arg::new("scale")
-                .help("Sets the scale of the interface. Default: 2")
-                .short('x')
+                .help("Sets the scale of the emulator window")
                 .long("scale")
-                .value_parser(parse_scale_var),
+                .default_value("2"),
+        )
+        .arg(
+            clap::Arg::new("width")
+                .help("Sets the width of the emulator")
+                .long("width"),
+        )
+        .arg(
+            clap::Arg::new("height")
+                .help("Sets the height of the emulator")
+                .long("height"),
+        )
+        .arg(
+            clap::Arg::new("stride-pixels")
+                .help("Sets the stride (in pixels) of the framebuffer")
+                .long("stride-pixels"),
+        )
+        .arg(
+            clap::Arg::new("bytes-per-pixel")
+                .help("Sets the bytes per pixel of the framebuffer")
+                .long("bytes-per-pixel"),
         )
         .arg(
             clap::Arg::new("audio")
@@ -136,6 +138,18 @@ fn real_main() -> i32 {
                 .help("Starts the emulator from a saved state file at the specified path")
                 .long("load-state"),
         )
+        .arg(
+            clap::Arg::new("framebuffer")
+                .help("Specify the path to the framebuffer output file")
+                .long("framebuffer")
+                .default_value("/dev/fb0"),
+        )
+        .arg(
+            clap::Arg::new("pinout")
+                .help("Specify the path to the GPIO pinout configuration file")
+                .long("pinout")
+                .default_value("pinout.toml"),
+        )
         .get_matches();
 
     let test_mode = matches.get_one::<bool>("test-mode").copied().unwrap();
@@ -148,7 +162,6 @@ fn real_main() -> i32 {
     let opt_audio = matches.get_one::<bool>("audio").copied().unwrap();
     let opt_skip_checksum = matches.get_one::<bool>("skip-checksum").copied().unwrap();
     let filename = matches.get_one::<String>("filename").unwrap();
-    let scale = matches.get_one::<u32>("scale").copied().unwrap_or(2);
 
     if test_mode {
         return run_test_mode(filename, opt_classic, opt_skip_checksum);
@@ -164,10 +177,9 @@ fn real_main() -> i32 {
         })
         .or_else(|| construct_cpu(filename, opt_classic, opt_skip_checksum, opt_reload.clone()));
 
-    if cpu.is_none() {
-        return EXITCODE_CPULOADFAILS;
-    }
-    let mut cpu = cpu.unwrap();
+    let Some(mut cpu) = cpu else {
+        return EXITCODE_CPU_LOAD_FAILS;
+    };
 
     if opt_printer {
         cpu.attach_printer();
@@ -185,156 +197,110 @@ fn real_main() -> i32 {
             }
             None => {
                 warn("Could not open audio device");
-                return EXITCODE_CPULOADFAILS;
+                return EXITCODE_CPU_LOAD_FAILS;
             }
         }
     }
-    let romname = cpu.romname();
 
-    let (sender1, receiver1) = mpsc::channel();
-    let (sender2, receiver2) = mpsc::sync_channel(1);
+    let width = matches
+        .get_one::<String>("width")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(160);
+    let height = matches
+        .get_one::<String>("height")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(144);
+    let stride_pixels = matches
+        .get_one::<String>("stride-pixels")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(160);
+    let bytes_per_pixel = matches
+        .get_one::<String>("bytes-per-pixel")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(2);
+    let scale = matches
+        .get_one::<String>("scale")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(2);
 
-    let mut event_loop = winit::event_loop::EventLoop::new().unwrap();
-    let window_builder = create_window_builder(&romname);
-    let (window, display) = glium::backend::glutin::SimpleWindowBuilder::new()
-        .set_window_builder(window_builder)
-        .build(&event_loop);
-    set_window_size(&window, scale);
+    let framebuffer_path = std::path::Path::new(
+        matches
+            .get_one::<String>("framebuffer")
+            .expect("Framebuffer path missing"),
+    );
 
-    let mut texture = glium::texture::texture2d::Texture2d::empty_with_format(
-        &display,
-        glium::texture::UncompressedFloatFormat::U8U8U8,
-        glium::texture::MipmapsOption::NoMipmap,
-        rboy::SCREEN_W as u32,
-        rboy::SCREEN_H as u32,
-    )
-    .unwrap();
+    let fb_config = FramebufferConfig {
+        path: framebuffer_path.to_path_buf(),
+        width,
+        height,
+        scale,
+        stride_pixels,
+        bytes_per_pixel,
+    };
+    let mut framebuffer = Framebuffer::new(fb_config).expect("Could not open framebuffer");
 
-    let mut renderoptions = <RenderOptions as Default>::default();
+    let (gb_event_sender, gb_event_receiver) = mpsc::channel();
+    let (video_sender, video_receiver) = mpsc::sync_channel(1);
 
-    let cputhread = thread::spawn(move || run_cpu(cpu, sender2, receiver1));
+    let cpu_thread = thread::spawn(move || run_cpu(cpu, video_sender, gb_event_receiver));
 
-    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    'evloop: loop {
-        let timeout = Some(std::time::Duration::ZERO);
-        let status = event_loop.pump_events(timeout, |ev, elwt| {
-            use winit::event::ElementState::{Pressed, Released};
-            use winit::event::{Event, WindowEvent};
-            use winit::keyboard::{Key, NamedKey};
-
-            match ev {
-                Event::WindowEvent { event, .. } => match event {
-                    WindowEvent::CloseRequested => elwt.exit(),
-                    WindowEvent::KeyboardInput {
-                        event: keyevent, ..
-                    } => match (keyevent.state, keyevent.logical_key.as_ref()) {
-                        (Pressed, Key::Named(NamedKey::Escape)) => elwt.exit(),
-                        (Pressed, Key::Character("1")) => set_window_size(&window, 1),
-                        (Pressed, Key::Character("r" | "R")) => set_window_size(&window, scale),
-                        (Pressed, Key::Named(NamedKey::Shift)) => {
-                            let _ = sender1.send(GBEvent::SpeedUp);
-                        }
-                        (Released, Key::Named(NamedKey::Shift)) => {
-                            let _ = sender1.send(GBEvent::SpeedDown);
-                        }
-                        (Pressed, Key::Character("t" | "T")) => {
-                            renderoptions.linear_interpolation =
-                                !renderoptions.linear_interpolation;
-                        }
-                        (Pressed, winitkey) => {
-                            if let Some(key) = winit_to_keypad(winitkey) {
-                                let _ = sender1.send(GBEvent::KeyDown(key));
-                            }
-                        }
-                        (Released, winitkey) => {
-                            if let Some(key) = winit_to_keypad(winitkey) {
-                                let _ = sender1.send(GBEvent::KeyUp(key));
-                            }
-                        }
-                    },
-                    _ => (),
-                },
-                _ => (),
-            }
-        });
-
-        if let PumpStatus::Exit(_) = status {
-            break 'evloop;
+    let pinout_config_path = matches
+        .get_one::<String>("pinout")
+        .expect("Pinout path missing");
+    let pinout_config_path = std::path::Path::new(pinout_config_path);
+    let pinout_config = match PinoutConfig::load_from_file(pinout_config_path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            warn(&format!("Could not load pinout configuration: {}", e));
+            return EXITCODE_CPU_LOAD_FAILS;
         }
-        match receiver2.recv() {
-            Ok(data) => recalculate_screen(&display, &mut texture, &*data, &renderoptions),
-            Err(..) => break 'evloop, // Remote end has hung-up
+    };
+
+    // run input listener
+    let exit_flag = Arc::new(AtomicBool::new(false));
+    let (keyboard_event_sender, keyboard_event_receiver) = mpsc::channel();
+    let input_listener_thread =
+        run_input_listener(pinout_config, exit_flag.clone(), keyboard_event_sender);
+
+    loop {
+        if exit_flag.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+
+        if let Some((event, key)) = keyboard_event_receiver.try_recv() {
+            match event {
+                KeyEvent::Down => {
+                    let _ = gb_event_sender.send(GBEvent::KeyDown(key));
+                }
+                KeyEvent::Up => {
+                    let _ = gb_event_sender.send(GBEvent::KeyUp(key));
+                }
+            }
+        }
+
+        match video_receiver.try_recv() {
+            Ok(data) => {
+                if let Err(err) = framebuffer.write(&data) {
+                    warn(&format!("Could not write to framebuffer: {err}"));
+                    break;
+                }
+            }
+            Err(TryRecvError::Empty) => {
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(TryRecvError::Disconnected) => break, // Remote end has hung-up
         }
     }
+
+    // join
+    exit_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = input_listener_thread.join();
 
     drop(cpal_audio_stream);
-    drop(receiver2); // Stop CPU thread by disconnecting
-    let _ = cputhread.join();
+    drop(video_receiver); // Stop CPU thread by disconnecting
+    let _ = cpu_thread.join();
 
     EXITCODE_SUCCESS
-}
-
-fn winit_to_keypad(key: winit::keyboard::Key<&str>) -> Option<rboy::KeypadKey> {
-    use winit::keyboard::{Key, NamedKey};
-    match key {
-        Key::Character("Z" | "z") => Some(rboy::KeypadKey::A),
-        Key::Character("X" | "x") => Some(rboy::KeypadKey::B),
-        Key::Named(NamedKey::ArrowUp) => Some(rboy::KeypadKey::Up),
-        Key::Named(NamedKey::ArrowDown) => Some(rboy::KeypadKey::Down),
-        Key::Named(NamedKey::ArrowLeft) => Some(rboy::KeypadKey::Left),
-        Key::Named(NamedKey::ArrowRight) => Some(rboy::KeypadKey::Right),
-        Key::Named(NamedKey::Space) => Some(rboy::KeypadKey::Select),
-        Key::Named(NamedKey::Enter) => Some(rboy::KeypadKey::Start),
-        _ => None,
-    }
-}
-
-fn recalculate_screen<
-    T: glium::glutin::surface::SurfaceTypeTrait + glium::glutin::surface::ResizeableSurface + 'static,
->(
-    display: &glium::Display<T>,
-    texture: &mut glium::texture::texture2d::Texture2d,
-    datavec: &[u8],
-    renderoptions: &RenderOptions,
-) {
-    use glium::Surface;
-
-    let interpolation_type = if renderoptions.linear_interpolation {
-        glium::uniforms::MagnifySamplerFilter::Linear
-    } else {
-        glium::uniforms::MagnifySamplerFilter::Nearest
-    };
-
-    let rawimage2d = glium::texture::RawImage2d {
-        data: std::borrow::Cow::Borrowed(datavec),
-        width: rboy::SCREEN_W as u32,
-        height: rboy::SCREEN_H as u32,
-        format: glium::texture::ClientFormat::U8U8U8,
-    };
-    texture.write(
-        glium::Rect {
-            left: 0,
-            bottom: 0,
-            width: rboy::SCREEN_W as u32,
-            height: rboy::SCREEN_H as u32,
-        },
-        rawimage2d,
-    );
-
-    // We use a custom BlitTarget to transform OpenGL coordinates to row-column coordinates
-    let target = display.draw();
-    let (target_w, target_h) = target.get_dimensions();
-    texture.as_surface().blit_whole_color_to(
-        &target,
-        &glium::BlitTarget {
-            left: 0,
-            bottom: target_h,
-            width: target_w as i32,
-            height: -(target_h as i32),
-        },
-        interpolation_type,
-    );
-    target.finish().unwrap();
 }
 
 fn warn(message: &str) {
@@ -405,21 +371,14 @@ fn run_cpu(mut cpu: Box<Device>, sender: SyncSender<Vec<u8>>, receiver: Receiver
 }
 
 fn timer_periodic(ms: u64) -> Receiver<()> {
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(ms));
+    let (tx, rx) = mpsc::sync_channel(1);
+    thread::spawn(move || loop {
+        thread::sleep(std::time::Duration::from_millis(ms));
         if tx.send(()).is_err() {
             break;
         }
     });
     rx
-}
-
-fn set_window_size(window: &winit::window::Window, scale: u32) {
-    let _ = window.request_inner_size(winit::dpi::LogicalSize::<u32>::from((
-        rboy::SCREEN_W as u32 * scale,
-        rboy::SCREEN_H as u32 * scale,
-    )));
 }
 
 struct CpalPlayer {
@@ -572,7 +531,7 @@ fn cpal_thread<T: Sample + FromSample<f32>>(
     audio_buffer: &Arc<Mutex<Vec<(f32, f32)>>>,
 ) {
     let mut inbuffer = audio_buffer.lock().unwrap();
-    let outlen = ::std::cmp::min(outbuffer.len() / 2, inbuffer.len());
+    let outlen = std::cmp::min(outbuffer.len() / 2, inbuffer.len());
     for (i, (in_l, in_r)) in inbuffer.drain(..outlen).enumerate() {
         outbuffer[i * 2] = T::from_sample(in_l);
         outbuffer[i * 2 + 1] = T::from_sample(in_r);
@@ -628,7 +587,7 @@ fn run_test_mode(filename: &str, classic_mode: bool, skip_checksum: bool) -> i32
     let mut cpu = match opt_cpu {
         Err(errmsg) => {
             warn(errmsg);
-            return EXITCODE_CPULOADFAILS;
+            return EXITCODE_CPU_LOAD_FAILS;
         }
         Ok(cpu) => cpu,
     };
@@ -679,4 +638,52 @@ fn print_screenshot(data: Vec<u8>) {
         eprint!("{:02x}", b);
     }
     eprintln!();
+}
+
+fn run_input_listener(
+    config: PinoutConfig,
+    exit: Arc<AtomicBool>,
+    event_sender: Sender<rboy::input::Event>,
+) -> JoinHandle<()> {
+    let poll_interval = config.poll_interval();
+    let power_switches = config
+        .power_switches
+        .iter()
+        .map(|ps| PowerSwitch {
+            gpio: gpio(ps.gpio, ps.active_low.unwrap_or(config.default_active_low)),
+        })
+        .collect();
+    let keys = config
+        .keys
+        .iter()
+        .map(|kc| KeyConfig {
+            gpio: gpio(kc.gpio, kc.active_low.unwrap_or(config.default_active_low)),
+            keycode: kc.keycode.keycode(),
+            debounce: kc.debounce().unwrap_or(config.default_debounce()),
+            repeat: if kc.repeat {
+                Some(rboy::input::RepeatConfig {
+                    delay: kc
+                        .repeat_delay()
+                        .expect("Repeat delay must be set if repeat is true"),
+                    rate: kc
+                        .repeat_rate()
+                        .expect("Repeat rate must be set if repeat is true"),
+                })
+            } else {
+                None
+            },
+        })
+        .collect();
+
+    let config = InputListenerConfig {
+        exit,
+        power_switches,
+        keys,
+        poll_interval,
+    };
+    thread::spawn(move || InputListener::new(config, event_sender).run())
+}
+
+fn gpio(pin: u8, active_low: bool) -> RaspberryGpio {
+    RaspberryGpio::try_new(pin, active_low).expect("Could not connect to GPIO")
 }
