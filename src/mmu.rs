@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::gbmode::{GbMode, GbSpeed};
-use crate::gpu::GPU;
+use crate::gpu::Gpu;
 use crate::keypad::Keypad;
 use crate::serial::{Serial, SerialCallback};
 use crate::sound::Sound;
@@ -14,12 +14,12 @@ const ZRAM_SIZE: usize = 0x7F;
 #[derive(PartialEq, Serialize, Deserialize)]
 enum DMAType {
     NoDMA,
-    GDMA,
-    HDMA,
+    Gdma,
+    Hdma,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MMU {
+pub struct Mmu {
     #[serde(with = "serde_arrays")]
     wram: [u8; WRAM_SIZE],
     #[serde(with = "serde_arrays")]
@@ -30,7 +30,7 @@ pub struct MMU {
     pub serial: Serial,
     pub timer: Timer,
     pub keypad: Keypad,
-    pub gpu: GPU,
+    pub gpu: Gpu,
     #[serde(skip)]
     pub sound: Option<Sound>,
     hdma_status: DMAType,
@@ -38,7 +38,7 @@ pub struct MMU {
     hdma_dst: u16,
     hdma_len: u8,
     wrambank: usize,
-    pub mbc: Box<dyn mbc::MBC + 'static>,
+    pub mbc: Box<dyn mbc::Mbc + 'static>,
     pub gbmode: GbMode,
     gbspeed: GbSpeed,
     speed_switch_req: bool,
@@ -58,26 +58,26 @@ fn fill_random(slice: &mut [u8], start: u32) {
     }
 }
 
-impl MMU {
+impl Mmu {
     pub fn new(
-        cart: Box<dyn mbc::MBC + 'static>,
+        cart: Box<dyn mbc::Mbc + 'static>,
         serial_callback: Option<Box<dyn SerialCallback>>,
-    ) -> StrResult<MMU> {
+    ) -> StrResult<Mmu> {
         let serial = match serial_callback {
             Some(cb) => Serial::new_with_callback(cb),
             None => Serial::new(),
         };
-        let mut res = MMU {
+        let mut res = Mmu {
             wram: [0; WRAM_SIZE],
             zram: [0; ZRAM_SIZE],
             hdma: [0; 4],
             wrambank: 1,
             inte: 0,
             intf: 0,
-            serial: serial,
+            serial,
             timer: Timer::new(),
             keypad: Keypad::new(),
-            gpu: GPU::new(),
+            gpu: Gpu::new(),
             sound: None,
             mbc: cart,
             gbmode: GbMode::Classic,
@@ -98,24 +98,24 @@ impl MMU {
     }
 
     pub fn new_cgb(
-        cart: Box<dyn mbc::MBC + 'static>,
+        cart: Box<dyn mbc::Mbc + 'static>,
         serial_callback: Option<Box<dyn SerialCallback>>,
-    ) -> StrResult<MMU> {
+    ) -> StrResult<Mmu> {
         let serial = match serial_callback {
             Some(cb) => Serial::new_with_callback(cb),
             None => Serial::new(),
         };
-        let mut res = MMU {
+        let mut res = Mmu {
             wram: [0; WRAM_SIZE],
             zram: [0; ZRAM_SIZE],
             wrambank: 1,
             hdma: [0; 4],
             inte: 0,
             intf: 0,
-            serial: serial,
+            serial,
             timer: Timer::new(),
             keypad: Keypad::new(),
-            gpu: GPU::new_cgb(),
+            gpu: Gpu::new_cgb(),
             sound: None,
             mbc: cart,
             gbmode: GbMode::Color,
@@ -193,12 +193,13 @@ impl MMU {
         self.intf |= self.gpu.interrupt;
         self.gpu.interrupt = 0;
 
-        let _ = self.sound.as_mut().map_or((), |s| s.do_cycle(gputicks));
+        #[allow(unused)]
+        self.sound.as_mut().map_or((), |s| s.do_cycle(gputicks));
 
         self.intf |= self.serial.interrupt;
         self.serial.interrupt = 0;
 
-        return gputicks;
+        gputicks
     }
 
     pub fn rb(&mut self, address: u16) -> u8 {
@@ -333,7 +334,7 @@ impl MMU {
             0xFF53 => self.hdma[2] = v & 0x1F,
             0xFF54 => self.hdma[3] = v & 0xF0,
             0xFF55 => {
-                if self.hdma_status == DMAType::HDMA {
+                if self.hdma_status == DMAType::Hdma {
                     if v & 0x80 == 0 {
                         self.hdma_status = DMAType::NoDMA;
                     };
@@ -341,7 +342,7 @@ impl MMU {
                 }
                 let src = ((self.hdma[0] as u16) << 8) | (self.hdma[1] as u16);
                 let dst = ((self.hdma[2] as u16) << 8) | (self.hdma[3] as u16) | 0x8000;
-                if !(src <= 0x7FF0 || (src >= 0xA000 && src <= 0xDFF0)) {
+                if !(src <= 0x7FF0 || (0xA000..=0xDFF0).contains(&src)) {
                     panic!("HDMA transfer with illegal start address {:04X}", src);
                 }
 
@@ -350,9 +351,9 @@ impl MMU {
                 self.hdma_len = v & 0x7F;
 
                 self.hdma_status = if v & 0x80 == 0x80 {
-                    DMAType::HDMA
+                    DMAType::Hdma
                 } else {
-                    DMAType::GDMA
+                    DMAType::Gdma
                 };
             }
             _ => panic!("The address {:04X} should not be handled by hdma_write", a),
@@ -362,13 +363,13 @@ impl MMU {
     fn perform_vramdma(&mut self) -> u32 {
         match self.hdma_status {
             DMAType::NoDMA => 0,
-            DMAType::GDMA => self.perform_gdma(),
-            DMAType::HDMA => self.perform_hdma(),
+            DMAType::Gdma => self.perform_gdma(),
+            DMAType::Hdma => self.perform_hdma(),
         }
     }
 
     fn perform_hdma(&mut self) -> u32 {
-        if self.gpu.may_hdma() == false {
+        if !self.gpu.may_hdma() {
             return 0;
         }
 
@@ -377,7 +378,7 @@ impl MMU {
             self.hdma_status = DMAType::NoDMA;
         }
 
-        return 8;
+        8
     }
 
     fn perform_gdma(&mut self) -> u32 {
@@ -387,7 +388,7 @@ impl MMU {
         }
 
         self.hdma_status = DMAType::NoDMA;
-        return len * 8;
+        len * 8
     }
 
     fn perform_vramdma_row(&mut self) {

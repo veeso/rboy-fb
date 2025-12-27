@@ -92,7 +92,7 @@ impl LengthCounter {
         LengthCounter {
             enabled: false,
             value: 0,
-            max: max,
+            max,
         }
     }
 
@@ -178,7 +178,7 @@ impl SquareChannel {
             sweep_negate: false,
             sweep_did_negate: false,
             volume_envelope: VolumeEnvelope::new(),
-            blip: blip,
+            blip,
         }
     }
 
@@ -313,7 +313,7 @@ impl SquareChannel {
         if newfreq > 2047 {
             self.active = false;
         }
-        return newfreq;
+        newfreq
     }
 
     fn step_sweep(&mut self) {
@@ -321,21 +321,19 @@ impl SquareChannel {
 
         if self.sweep_delay > 1 {
             self.sweep_delay -= 1;
+        } else if self.sweep_period == 0 {
+            self.sweep_delay = SWEEP_DELAY_ZERO_PERIOD;
         } else {
-            if self.sweep_period == 0 {
-                self.sweep_delay = SWEEP_DELAY_ZERO_PERIOD;
-            } else {
-                self.sweep_delay = self.sweep_period;
-                if self.sweep_enabled {
-                    let newfreq = self.sweep_calculate_frequency();
-                    if newfreq <= 2047 {
-                        if self.sweep_shift != 0 {
-                            self.sweep_frequency = newfreq;
-                            self.frequency = newfreq;
-                            self.calculate_period();
-                        }
-                        self.sweep_calculate_frequency();
+            self.sweep_delay = self.sweep_period;
+            if self.sweep_enabled {
+                let newfreq = self.sweep_calculate_frequency();
+                if newfreq <= 2047 {
+                    if self.sweep_shift != 0 {
+                        self.sweep_frequency = newfreq;
+                        self.frequency = newfreq;
+                        self.calculate_period();
                     }
+                    self.sweep_calculate_frequency();
                 }
             }
         }
@@ -371,9 +369,9 @@ impl WaveChannel {
             volume_shift: 0,
             waveram: [0; 16],
             current_wave: 0,
-            dmg_mode: dmg_mode,
+            dmg_mode,
             sample_recently_accessed: false,
-            blip: blip,
+            blip,
         }
     }
 
@@ -387,12 +385,10 @@ impl WaveChannel {
             0xFF30..=0xFF3F => {
                 if !self.active {
                     self.waveram[a as usize - 0xFF30]
+                } else if !self.dmg_mode || self.sample_recently_accessed {
+                    self.waveram[self.current_wave as usize >> 1]
                 } else {
-                    if !self.dmg_mode || self.sample_recently_accessed {
-                        self.waveram[self.current_wave as usize >> 1]
-                    } else {
-                        0xFF
-                    }
+                    0xFF
                 }
             }
             _ => unimplemented!(),
@@ -434,10 +430,8 @@ impl WaveChannel {
             0xFF30..=0xFF3F => {
                 if !self.active {
                     self.waveram[a as usize - 0xFF30] = v;
-                } else {
-                    if !self.dmg_mode || self.sample_recently_accessed {
-                        self.waveram[self.current_wave as usize >> 1] = v;
-                    }
+                } else if !self.dmg_mode || self.sample_recently_accessed {
+                    self.waveram[self.current_wave as usize >> 1] = v;
                 }
             }
             _ => (),
@@ -481,7 +475,7 @@ impl WaveChannel {
 
             while time < end_time {
                 let wavebyte = self.waveram[self.current_wave as usize >> 1];
-                let sample = if self.current_wave % 2 == 0 {
+                let sample = if self.current_wave.is_multiple_of(2) {
                     wavebyte >> 4
                 } else {
                     wavebyte & 0xF
@@ -565,7 +559,7 @@ impl NoiseChannel {
             state: 1,
             delay: 0,
             last_amp: 0,
-            blip: blip,
+            blip,
         }
     }
 
@@ -714,14 +708,14 @@ impl Sound {
             reg_vin_to_so: 0x00,
             reg_ff25: 0x00,
             need_sync: false,
-            dmg_mode: dmg_mode,
-            player: player,
+            dmg_mode,
+            player,
         }
     }
 
     pub fn rb(&mut self, a: u16) -> u8 {
         self.run();
-        let v = match a {
+        match a {
             0xFF10..=0xFF14 => self.channel1.rb(a),
             0xFF16..=0xFF19 => self.channel2.rb(a),
             0xFF1A..=0xFF1E => self.channel3.rb(a),
@@ -738,8 +732,7 @@ impl Sound {
             }
             0xFF30..=0xFF3F => self.channel3.rb(a),
             _ => 0xFF,
-        };
-        return v;
+        }
     }
 
     pub fn wb(&mut self, a: u16, v: u8) {
@@ -773,7 +766,7 @@ impl Sound {
             0xFF25 => self.reg_ff25 = v,
             0xFF26 => {
                 let turn_on = v & 0x80 == 0x80;
-                if self.on && turn_on == false {
+                if self.on && !turn_on {
                     // Reset all registers to 0 when turning off
                     for i in 0xFF10..=0xFF25 {
                         self.wb(i, 0);
@@ -833,7 +826,7 @@ impl Sound {
             self.channel3.run(self.prev_time, self.next_time);
             self.channel4.run(self.prev_time, self.next_time);
 
-            if self.frame_step % 2 == 0 {
+            if self.frame_step.is_multiple_of(2) {
                 self.channel1.step_length();
                 self.channel2.step_length();
                 self.channel3.step_length();

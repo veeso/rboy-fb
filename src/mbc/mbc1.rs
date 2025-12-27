@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::StrResult;
-use crate::mbc::{MBC, ram_banks, rom_banks};
+use crate::mbc::{Mbc, ram_banks, rom_banks};
 
 #[derive(Serialize, Deserialize)]
 pub struct MBC1 {
@@ -29,15 +29,15 @@ impl MBC1 {
 
         let res = MBC1 {
             rom: data,
-            ram: ::std::iter::repeat(0u8).take(ramsize).collect(),
+            ram: std::iter::repeat_n(0u8, ramsize).collect(),
             ram_on: false,
             banking_mode: 0,
             rombank: 1,
             rambank: 0,
             ram_updated: false,
-            has_battery: has_battery,
-            rombanks: rombanks,
-            rambanks: rambanks,
+            has_battery,
+            rombanks,
+            rambanks,
         };
 
         Ok(res)
@@ -45,7 +45,7 @@ impl MBC1 {
 }
 
 #[typetag::serde]
-impl MBC for MBC1 {
+impl Mbc for MBC1 {
     fn readrom(&self, a: u16) -> u8 {
         let bank = if a < 0x4000 {
             if self.banking_mode == 0 {
@@ -56,7 +56,7 @@ impl MBC for MBC1 {
         } else {
             self.rombank
         };
-        let idx = bank * 0x4000 | ((a as usize) & 0x3FFF);
+        let idx = (bank * 0x4000) | ((a as usize) & 0x3FFF);
         *self.rom.get(idx).unwrap_or(&0xFF)
     }
     fn readram(&self, a: u16) -> u8 {

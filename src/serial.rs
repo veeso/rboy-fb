@@ -28,14 +28,12 @@ impl Serial {
             0xFF01 => self.data = v,
             0xFF02 => {
                 self.control = v;
-                if v & 0x81 == 0x81 {
-                    if let Some(callback) = &mut self.callback {
-                        if let Some(result) = callback.call(self.data) {
+                if v & 0x81 == 0x81
+                    && let Some(callback) = &mut self.callback
+                        && let Some(result) = callback.call(self.data) {
                             self.data = result;
                             self.interrupt = 0x8;
                         }
-                    }
-                }
             }
             _ => panic!("Serial does not handle address {:4X} (write)", a),
         };

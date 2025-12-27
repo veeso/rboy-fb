@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::StrResult;
-use crate::mbc::{MBC, ram_banks, rom_banks};
+use crate::mbc::{Mbc, ram_banks, rom_banks};
 
 #[derive(Serialize, Deserialize)]
 pub struct MBC5 {
@@ -19,10 +19,7 @@ pub struct MBC5 {
 impl MBC5 {
     pub fn new(data: Vec<u8>) -> StrResult<MBC5> {
         let subtype = data[0x147];
-        let has_battery = match subtype {
-            0x1B | 0x1E => true,
-            _ => false,
-        };
+        let has_battery = matches!(subtype, 0x1B | 0x1E);
         let rambanks = match subtype {
             0x1A | 0x1B | 0x1D | 0x1E => ram_banks(data[0x149]),
             _ => 0,
@@ -32,14 +29,14 @@ impl MBC5 {
 
         let res = MBC5 {
             rom: data,
-            ram: ::std::iter::repeat(0u8).take(ramsize).collect(),
+            ram: std::iter::repeat_n(0u8, ramsize).collect(),
             rombank: 1,
             rambank: 0,
             ram_updated: false,
             ram_on: false,
-            has_battery: has_battery,
-            rombanks: rombanks,
-            rambanks: rambanks,
+            has_battery,
+            rombanks,
+            rambanks,
         };
 
         Ok(res)
@@ -47,12 +44,12 @@ impl MBC5 {
 }
 
 #[typetag::serde]
-impl MBC for MBC5 {
+impl Mbc for MBC5 {
     fn readrom(&self, a: u16) -> u8 {
         let idx = if a < 0x4000 {
             a as usize
         } else {
-            self.rombank * 0x4000 | ((a as usize) & 0x3FFF)
+            (self.rombank * 0x4000) | ((a as usize) & 0x3FFF)
         };
         *self.rom.get(idx).unwrap_or(&0)
     }
@@ -60,7 +57,7 @@ impl MBC for MBC5 {
         if !self.ram_on {
             return 0;
         }
-        self.ram[self.rambank * 0x2000 | ((a as usize) & 0x1FFF)]
+        self.ram[(self.rambank * 0x2000) | ((a as usize) & 0x1FFF)]
     }
     fn writerom(&mut self, a: u16, v: u8) {
         match a {
@@ -78,10 +75,10 @@ impl MBC for MBC5 {
         }
     }
     fn writeram(&mut self, a: u16, v: u8) {
-        if self.ram_on == false {
+        if !self.ram_on {
             return;
         }
-        self.ram[self.rambank * 0x2000 | ((a as usize) & 0x1FFF)] = v;
+        self.ram[(self.rambank * 0x2000) | ((a as usize) & 0x1FFF)] = v;
         self.ram_updated = true;
     }
 

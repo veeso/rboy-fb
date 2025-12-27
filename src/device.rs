@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cpu::CPU;
+use crate::cpu::Cpu;
 use crate::gbmode::GbMode;
 use crate::keypad::KeypadKey;
 use crate::printer::GbPrinter;
@@ -11,7 +11,7 @@ use crate::{StrResult, mbc, serial, sound};
 
 #[derive(Serialize, Deserialize)]
 pub struct Device {
-    cpu: CPU,
+    cpu: Cpu,
     save_state: Option<String>,
 }
 
@@ -53,10 +53,7 @@ impl Device {
         save_state: Option<String>,
     ) -> StrResult<Device> {
         let cart = mbc::FileBackedMBC::new(romname.to_path_buf(), skip_checksum)?;
-        CPU::new(Box::new(cart), None).map(|cpu| Device {
-            cpu: cpu,
-            save_state,
-        })
+        Cpu::new(Box::new(cart), None).map(|cpu| Device { cpu, save_state })
     }
 
     pub fn new_cgb(
@@ -65,10 +62,7 @@ impl Device {
         save_state: Option<String>,
     ) -> StrResult<Device> {
         let cart = mbc::FileBackedMBC::new(romname.to_path_buf(), skip_checksum)?;
-        CPU::new_cgb(Box::new(cart), None).map(|cpu| Device {
-            cpu: cpu,
-            save_state,
-        })
+        Cpu::new_cgb(Box::new(cart), None).map(|cpu| Device { cpu, save_state })
     }
 
     pub fn new_from_buffer(
@@ -77,10 +71,7 @@ impl Device {
         save_state: Option<String>,
     ) -> StrResult<Device> {
         let cart = mbc::get_mbc(romdata, skip_checksum)?;
-        CPU::new(cart, None).map(|cpu| Device {
-            cpu: cpu,
-            save_state,
-        })
+        Cpu::new(cart, None).map(|cpu| Device { cpu, save_state })
     }
 
     pub fn new_cgb_from_buffer(
@@ -89,10 +80,7 @@ impl Device {
         save_state: Option<String>,
     ) -> StrResult<Device> {
         let cart = mbc::get_mbc(romdata, skip_checksum)?;
-        CPU::new_cgb(cart, None).map(|cpu| Device {
-            cpu: cpu,
-            save_state,
-        })
+        Cpu::new_cgb(cart, None).map(|cpu| Device { cpu, save_state })
     }
 
     pub fn do_cycle(&mut self) -> u32 {
@@ -140,10 +128,8 @@ impl Device {
                 self.cpu.mmu.sound = Some(sound::Sound::new_cgb(player));
             }
         };
-        if is_on {
-            if let Some(sound) = self.cpu.mmu.sound.as_mut() {
-                sound.set_on();
-            }
+        if is_on && let Some(sound) = self.cpu.mmu.sound.as_mut() {
+            sound.set_on();
         }
     }
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::StrResult;
-use crate::mbc::MBC;
+use crate::mbc::Mbc;
 
 #[derive(Serialize, Deserialize)]
 pub struct MBC0 {
@@ -15,19 +15,15 @@ impl MBC0 {
 }
 
 #[typetag::serde]
-impl MBC for MBC0 {
+impl Mbc for MBC0 {
     fn readrom(&self, a: u16) -> u8 {
         self.rom[a as usize]
     }
     fn readram(&self, _a: u16) -> u8 {
         0
     }
-    fn writerom(&mut self, _a: u16, _v: u8) {
-        ()
-    }
-    fn writeram(&mut self, _a: u16, _v: u8) {
-        ()
-    }
+    fn writerom(&mut self, _a: u16, _v: u8) {}
+    fn writeram(&mut self, _a: u16, _v: u8) {}
 
     fn is_battery_backed(&self) -> bool {
         false

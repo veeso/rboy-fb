@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
             AppState::Emulator { config, rom_file } => {
                 run_emulator(&rom_file, config, framebuffer.clone())?
             }
-            AppState::Menu { config } => {
+            AppState::Menu { config: _ } => {
                 todo!();
             }
             AppState::Exit => break,
@@ -249,10 +249,7 @@ struct CpalPlayer {
 
 impl CpalPlayer {
     fn get() -> Option<(CpalPlayer, cpal::Stream)> {
-        let device = match cpal::default_host().default_output_device() {
-            Some(e) => e,
-            None => return None,
-        };
+        let device = cpal::default_host().default_output_device()?;
 
         // We want a config with:
         // chanels = 2
@@ -277,9 +274,7 @@ impl CpalPlayer {
                 break;
             }
         }
-        if supported_config.is_none() {
-            return None;
-        }
+        supported_config.as_ref()?;
 
         let selected_config = supported_config.unwrap();
 
@@ -420,7 +415,7 @@ impl rboy::AudioPlayer for CpalPlayer {
     }
 
     fn underflowed(&self) -> bool {
-        (*self.buffer.lock().unwrap()).len() == 0
+        (*self.buffer.lock().unwrap()).is_empty()
     }
 }
 

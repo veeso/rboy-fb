@@ -13,7 +13,7 @@ mod mbc3;
 mod mbc5;
 
 #[typetag::serde(tag = "type")]
-pub trait MBC: Send {
+pub trait Mbc: Send {
     fn readrom(&self, a: u16) -> u8;
     fn readram(&self, a: u16) -> u8;
     fn writerom(&mut self, a: u16, v: u8);
@@ -46,7 +46,7 @@ pub trait MBC: Send {
     }
 }
 
-pub fn get_mbc(data: Vec<u8>, skip_checksum: bool) -> StrResult<Box<dyn MBC + 'static>> {
+pub fn get_mbc(data: Vec<u8>, skip_checksum: bool) -> StrResult<Box<dyn Mbc + 'static>> {
     if data.len() < 0x150 {
         return Err("Rom size to small");
     }
@@ -54,11 +54,11 @@ pub fn get_mbc(data: Vec<u8>, skip_checksum: bool) -> StrResult<Box<dyn MBC + 's
         check_checksum(&data)?;
     }
     match data[0x147] {
-        0x00 => mbc0::MBC0::new(data).map(|v| Box::new(v) as Box<dyn MBC>),
-        0x01..=0x03 => mbc1::MBC1::new(data).map(|v| Box::new(v) as Box<dyn MBC>),
-        0x05..=0x06 => mbc2::MBC2::new(data).map(|v| Box::new(v) as Box<dyn MBC>),
-        0x0F..=0x13 => mbc3::MBC3::new(data).map(|v| Box::new(v) as Box<dyn MBC>),
-        0x19..=0x1E => mbc5::MBC5::new(data).map(|v| Box::new(v) as Box<dyn MBC>),
+        0x00 => mbc0::MBC0::new(data).map(|v| Box::new(v) as Box<dyn Mbc>),
+        0x01..=0x03 => mbc1::MBC1::new(data).map(|v| Box::new(v) as Box<dyn Mbc>),
+        0x05..=0x06 => mbc2::MBC2::new(data).map(|v| Box::new(v) as Box<dyn Mbc>),
+        0x0F..=0x13 => mbc3::MBC3::new(data).map(|v| Box::new(v) as Box<dyn Mbc>),
+        0x19..=0x1E => mbc5::MBC5::new(data).map(|v| Box::new(v) as Box<dyn Mbc>),
         _ => Err("Unsupported MBC type"),
     }
 }
@@ -66,7 +66,7 @@ pub fn get_mbc(data: Vec<u8>, skip_checksum: bool) -> StrResult<Box<dyn MBC + 's
 #[derive(Serialize, Deserialize)]
 pub struct FileBackedMBC {
     rampath: path::PathBuf,
-    mbc: Box<dyn MBC>,
+    mbc: Box<dyn Mbc>,
 }
 
 impl FileBackedMBC {
@@ -101,7 +101,7 @@ impl FileBackedMBC {
 
 // Implement MBC for FileBackedMBC such that the MMU can use this transparently
 #[typetag::serde]
-impl MBC for FileBackedMBC {
+impl Mbc for FileBackedMBC {
     fn readrom(&self, a: u16) -> u8 {
         self.mbc.readrom(a)
     }
@@ -171,8 +171,8 @@ fn rom_banks(v: u8) -> usize {
 
 fn check_checksum(data: &[u8]) -> StrResult<()> {
     let mut value: u8 = 0;
-    for i in 0x134..0x14D {
-        value = value.wrapping_sub(data[i]).wrapping_sub(1);
+    for item in data.iter().take(0x14D).skip(0x134) {
+        value = value.wrapping_sub(*item).wrapping_sub(1);
     }
     match data[0x14D] == value {
         true => Ok(()),
