@@ -59,39 +59,38 @@ impl Framebuffer {
 
         let dst_h = self.height as f32;
 
-        // scale based on height
-        let scale = dst_h / src_h; // 240 / 144 ≈ 1.6667
+        // Scale factor to fit height
+        let scale = dst_h / src_h;
 
         let scaled_w = (src_w * scale).round() as usize;
-        let x_offset = ((self.width - scaled_w) / 2) as isize;
+        let x_offset = (self.width - scaled_w) / 2;
 
-        for sy in 0..crate::SCREEN_H {
-            // y dest (float → int)
-            let dy = (sy as f32 * scale).round() as isize;
-
-            if dy < 0 || dy >= self.height as isize {
+        for dy in 0..self.height {
+            // map dy to sy in source buffer
+            let sy = (dy as f32 / scale).floor() as usize;
+            if sy >= crate::SCREEN_H {
                 continue;
             }
 
-            for sx in 0..crate::SCREEN_W {
-                let i = (sy * crate::SCREEN_W + sx) * 3;
+            unsafe {
+                let row = self.ptr.add(dy * self.stride);
 
-                let r = buf[i];
-                let g = buf[i + 1];
-                let b = buf[i + 2];
+                for dx in 0..scaled_w {
+                    let sx = (dx as f32 / scale).floor() as usize;
+                    if sx >= crate::SCREEN_W {
+                        continue;
+                    }
 
-                let rgb565: u16 =
-                    ((r as u16 >> 3) << 11) | ((g as u16 >> 2) << 5) | (b as u16 >> 3);
+                    let i = (sy * crate::SCREEN_W + sx) * 3;
 
-                let dx = (sx as f32 * scale).round() as isize + x_offset;
+                    let r = buf[i];
+                    let g = buf[i + 1];
+                    let b = buf[i + 2];
 
-                if dx < 0 || dx >= self.width as isize {
-                    continue;
-                }
+                    let rgb565: u16 =
+                        ((r as u16 >> 3) << 11) | ((g as u16 >> 2) << 5) | (b as u16 >> 3);
 
-                unsafe {
-                    let row = self.ptr.add(dy as usize * self.stride);
-                    *row.add(dx as usize) = rgb565;
+                    *row.add(x_offset + dx) = rgb565;
                 }
             }
         }
