@@ -55,17 +55,23 @@ impl Framebuffer {
     }
 
     pub fn write(&self, buf: &[u8]) {
-        let crop_top = (crate::SCREEN_H * self.scale - self.height) / self.scale;
+        let scaled_h = crate::SCREEN_H * self.scale;
+        let y_offset: isize = (self.height as isize - scaled_h as isize) / 2;
 
         for sy in 0..crate::SCREEN_H {
             let dy0 = sy * self.scale;
             let dy1 = dy0 + 1;
-            if dy1 < crop_top || dy0 >= crop_top + self.height {
+
+            let dst_y0 = dy0 as isize + y_offset;
+            let dst_y1 = dy1 as isize + y_offset;
+
+            // do not draw outside of framebuffer
+            if dst_y1 < 0 || dst_y0 >= self.height as isize {
                 continue;
             }
 
-            let dst_y0 = dy0.saturating_sub(crop_top);
-            let dst_y1 = dy1.saturating_sub(crop_top);
+            let dst_y0 = dst_y0 as usize;
+            let dst_y1 = dst_y1 as usize;
 
             for sx in 0..crate::SCREEN_W {
                 let i = (sy * crate::SCREEN_W + sx) * 3;

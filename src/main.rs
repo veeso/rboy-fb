@@ -184,7 +184,7 @@ fn run_emulator(
 
         match video_receiver.try_recv() {
             Ok(data) => {
-                debug!("Received video frame, updating framebuffer");
+                trace!("Received video frame, updating framebuffer");
                 framebuffer.write(&data);
             }
             Err(TryRecvError::Empty) => {
