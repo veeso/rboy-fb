@@ -22,9 +22,6 @@ pub struct Args {
     /// log level (error, warn, info, debug, trace) (default: info)
     #[argh(option, default = "log_level::LogLevel::Info")]
     pub log_level: log_level::LogLevel,
-    /// scale factor for the framebuffer output (default: 2)
-    #[argh(option, default = "2")]
-    pub scale: usize,
     /// framebuffer stride in pixels (default: 320)
     #[argh(option, default = "320")]
     pub stride_pixels: usize,

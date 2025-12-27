@@ -58,7 +58,6 @@ fn main() -> anyhow::Result<()> {
         height: args.height,
         bytes_per_pixel: args.bytes_per_pixel,
         stride_pixels: args.stride_pixels,
-        scale: args.scale,
     })?);
     info!("Framebuffer opened.");
 

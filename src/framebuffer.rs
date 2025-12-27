@@ -7,16 +7,15 @@ pub struct FramebufferConfig {
     pub height: usize,
     pub bytes_per_pixel: usize,
     pub stride_pixels: usize,
-    pub scale: usize,
 }
 
 /// Represents a memory-mapped framebuffer.
 pub struct Framebuffer {
+    width: usize,
     height: usize,
     ptr: *mut u16,
     /// The number of pixels in a single row of the framebuffer.
     stride: usize,
-    scale: usize,
 }
 
 impl Framebuffer {
@@ -47,7 +46,7 @@ impl Framebuffer {
             return Err(anyhow::anyhow!("Failed to mmap framebuffer"));
         }
         Ok(Framebuffer {
-            scale: config.scale,
+            width: config.width,
             height: config.height,
             ptr,
             stride: config.stride_pixels,
@@ -55,19 +54,22 @@ impl Framebuffer {
     }
 
     pub fn write(&self, buf: &[u8]) {
-        let scaled_h = crate::SCREEN_H * self.scale;
-        let y_offset: isize = (self.height as isize - scaled_h as isize) / 2;
+        let src_w = crate::SCREEN_W as f32;
+        let src_h = crate::SCREEN_H as f32;
 
-        debug!(
-            "Writing framebuffer: y_offset = {}, scaled_h = {}",
-            y_offset, scaled_h
-        );
+        let dst_h = self.height as f32;
+
+        // scale based on height
+        let scale = dst_h / src_h; // 240 / 144 ≈ 1.6667
+
+        let scaled_w = (src_w * scale).round() as usize;
+        let x_offset = ((self.width - scaled_w) / 2) as isize;
 
         for sy in 0..crate::SCREEN_H {
-            let dy_base = (sy * self.scale) as isize + y_offset;
+            // y dest (float → int)
+            let dy = (sy as f32 * scale).round() as isize;
 
-            // Out of bounds vertical
-            if dy_base + (self.scale as isize) <= 0 || dy_base >= self.height as isize {
+            if dy < 0 || dy >= self.height as isize {
                 continue;
             }
 
@@ -81,22 +83,15 @@ impl Framebuffer {
                 let rgb565: u16 =
                     ((r as u16 >> 3) << 11) | ((g as u16 >> 2) << 5) | (b as u16 >> 3);
 
-                let dx_base = sx * self.scale;
+                let dx = (sx as f32 * scale).round() as isize + x_offset;
 
-                // Draw a scale×scale block
-                for py in 0..self.scale {
-                    let dy = dy_base + py as isize;
-                    if dy < 0 || dy >= self.height as isize {
-                        continue;
-                    }
+                if dx < 0 || dx >= self.width as isize {
+                    continue;
+                }
 
-                    unsafe {
-                        let row = self.ptr.add(dy as usize * self.stride);
-
-                        for px in 0..self.scale {
-                            *row.add(dx_base + px) = rgb565;
-                        }
-                    }
+                unsafe {
+                    let row = self.ptr.add(dy as usize * self.stride);
+                    *row.add(dx as usize) = rgb565;
                 }
             }
         }

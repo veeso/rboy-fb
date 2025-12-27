@@ -18,12 +18,11 @@ Options:
   --config <config>                   Sets the configuration file to use [default: rboy_config.toml]
   --framebuffer-path <framebuffer-path>
                                      Sets the framebuffer device path [default: /dev/fb0]
-  --width <width>                     Sets the framebuffer width [default: 800]
-  --height <height>                   Sets the framebuffer height [default: 600]
+  --width <width>                     Sets the framebuffer width [default: 320]
+  --height <height>                   Sets the framebuffer height [default: 240]
   --bytes-per-pixel <bytes-per-pixel>
                                      Sets the framebuffer bytes per pixel [default: 2]
-  --stride-pixels <stride-pixels>     Sets the framebuffer stride in pixels [default: 800]
-  --scale <scale>                     Sets the framebuffer scale [default: 1]
+  --stride-pixels <stride-pixels>     Sets the framebuffer stride in pixels [default: 320]
 ```
 
 Now you can look below for the Keybindings section below.
