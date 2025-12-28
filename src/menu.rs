@@ -180,11 +180,8 @@ impl AppMenu {
         );
 
         // write at middle
-        let mut y = self.framebuffer.height() - 4;
-        let x = self
-            .framebuffer
-            .width()
-            .saturating_sub(SPLASH_TEXT.len() / 2);
+        let mut y = (self.framebuffer.height() / 2) - 4;
+        let x = (self.framebuffer.width() / 2).saturating_sub(SPLASH_TEXT.len() / 2);
 
         self.draw_text(SPLASH_TEXT, x, &mut y, false, COLOR_BLACK);
 
