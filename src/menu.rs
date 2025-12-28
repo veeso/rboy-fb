@@ -17,7 +17,7 @@ const LINE_H: usize = 16;
 const PADDING_Y: usize = 16;
 const PADDING_X: usize = 16;
 const SPACE_SIZE: usize = 8;
-const TITLE: &str = "RBoy-lego - Press start to play a game";
+const SUBTITLE: &str = "Press start to play a game";
 const NO_GAMES: &str = "You have no games in your ROMs directory";
 
 pub struct AppMenu {
@@ -75,6 +75,7 @@ impl AppMenu {
                         continue;
                     }
                 };
+                info!("Found game: {name} for {platform:?} at {path}", path = path.display());
                 games.push(GameEntry {
                     name: name.to_string(),
                     path,
@@ -151,13 +152,22 @@ impl AppMenu {
         // zero
         self.framebuffer.zero();
 
-        let max_visible = self.framebuffer.height() / 16;
-        let top = max_visible.saturating_sub(selected);
+        let max_visible = (self.framebuffer.height() / 16).saturating_sub(2); // title + subtitle (2)
+        let skip = usize::clamp(
+            selected.saturating_sub(max_visible /2),
+            0,
+            usize::max(0, self.games.len().saturating_sub(max_visible))
+        );
+        debug!("Skipping {skip} (max visible: {max_visible}) games");
 
         let mut y = PADDING_Y;
 
         // write title first
-        self.draw_text(TITLE, PADDING_X, &mut y, false);
+        self.draw_text(&format!("{crate_name} {crate_version}",
+            crate_name = env!("CARGO_PKG_NAME"),
+            crate_version = env!("CARGO_PKG_VERSION")
+        ), PADDING_X, &mut y, false);
+        self.draw_text(SUBTITLE, PADDING_X, &mut y, false);
 
         // write message if there are no games
         if self.games.is_empty() {
@@ -165,9 +175,9 @@ impl AppMenu {
             return;
         }
 
-        for (i, game) in self.games.iter().skip(top).take(max_visible).enumerate() {
+        for (i, game) in self.games.iter().skip(skip).take(max_visible).enumerate() {
             let x = PADDING_X; // padding
-            let is_selected = top + i == selected;
+            let is_selected = skip + i == selected;
             let line = format!(
                 "{} {} - {}",
                 if is_selected { "> " } else { "  " },
