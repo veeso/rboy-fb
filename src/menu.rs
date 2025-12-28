@@ -134,11 +134,11 @@ impl AppMenu {
                         config: self.config,
                     });
                 }
-                (KeyEvent::Down, KeypadKey::Down) => {
+                (KeyEvent::Down, KeypadKey::Up) => {
                     selected = selected.saturating_sub(1);
                     redraw = true;
                 }
-                (KeyEvent::Down, KeypadKey::Up) => {
+                (KeyEvent::Down, KeypadKey::Down) => {
                     if selected + 1 < self.games.len() {
                         selected = selected.saturating_add(1);
                         redraw = true;
