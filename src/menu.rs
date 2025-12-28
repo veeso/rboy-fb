@@ -75,6 +75,8 @@ impl AppMenu {
                         continue;
                     }
                 };
+                // remove extension from name
+                let name = name.trim_end_matches(".gb").trim_end_matches(".gbc").to_string();
                 info!("Found game: {name} for {platform:?} at {path}", path = path.display());
                 games.push(GameEntry {
                     name: name.to_string(),
@@ -180,7 +182,7 @@ impl AppMenu {
             let is_selected = skip + i == selected;
             let line = format!(
                 "{} {} - {}",
-                if is_selected { "> " } else { "  " },
+                if is_selected { ">" } else { " " },
                 game.name,
                 match game.platform {
                     Platform::GameBoy => "GameBoy",
