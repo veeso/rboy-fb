@@ -181,9 +181,10 @@ impl AppMenu {
 
         // write at middle
         let mut y = (self.framebuffer.height() / 2) - 4;
-        let x = (self.framebuffer.width() / 2).saturating_sub(SPLASH_TEXT.len() / 2);
+        let x = (self.framebuffer.width() / 2).saturating_sub(SPLASH_TEXT.len());
 
         self.draw_text(SPLASH_TEXT, x, &mut y, false, COLOR_BLACK);
+        std::thread::sleep(Duration::from_secs(1));
 
         if let Err(err) = self.play_boot_sound() {
             error!("Failed to play boot sound: {err}");
@@ -191,7 +192,7 @@ impl AppMenu {
 
         // wait for 10 seconds
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(4) {
             if self.exit.load(Ordering::Relaxed) {
                 break;
             }
