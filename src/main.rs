@@ -96,6 +96,9 @@ fn main() -> anyhow::Result<()> {
         debug!("New AppState: {app_state:?}",);
     }
 
+    // zero fb
+    framebuffer.zero();
+
     Ok(())
 }
 
@@ -294,7 +297,7 @@ impl CpalPlayer {
         let device = cpal::default_host().default_output_device()?;
 
         // We want a config with:
-        // chanels = 2
+        // channels = 2
         // SampleFormat F32
         // Rate at around 44100
 
